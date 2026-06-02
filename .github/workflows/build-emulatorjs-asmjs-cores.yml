@@ -16,52 +16,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  discover-cores:
+    name: discover emulatorjs cores
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.cores.outputs.matrix }}
+      skipped: ${{ steps.cores.outputs.skipped }}
+    steps:
+      - name: Checkout build scripts
+        uses: actions/checkout@v4
+        with:
+          repository: EmulatorJS/build
+          ref: main
+          path: emulatorjs-build
+
+      - name: Generate core matrix
+        id: cores
+        working-directory: emulatorjs-build
+        run: |
+          matrix="$(jq -c '{include: [.[] | select(.options.requireThreads != true) | {core: .name}]}' cores.json)"
+          skipped="$(jq -r '[.[] | select(.options.requireThreads == true) | .name] | join(",")' cores.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+          echo "Asm.js candidates:"
+          echo "$matrix" | jq -r '.include[].core'
+          if [ -n "$skipped" ]; then
+            echo "Skipped thread-only cores: $skipped"
+          fi
+
   build-core:
-    name: build ${{ matrix.platform }} (${{ matrix.core }})
+    name: build ${{ matrix.core }}
+    needs: discover-cores
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: psp
-            core: ppsspp
-          - platform: gba
-            core: mgba
-          - platform: nds
-            core: melonds
-          - platform: nds
-            core: desmume2015
-          - platform: nds
-            core: desmume
-          - platform: gb
-            core: gambatte
-          - platform: gbc
-            core: gambatte
-          - platform: md
-            core: genesis_plus_gx
-          - platform: md
-            core: genesis_plus_gx_wide
-          - platform: wsc
-            core: mednafen_wswan
-          - platform: ps1
-            core: pcsx_rearmed
-          - platform: ps1
-            core: mednafen_psx_hw
-          - platform: ss
-            core: yabause
-          - platform: dos
-            core: dosbox_pure
-          - platform: sfc
-            core: snes9x
-          - platform: sfc
-            core: bsnes
-          - platform: fc
-            core: fceumm
-          - platform: fc
-            core: nestopia
-          - platform: n64
-            core: mupen64plus_next
+      max-parallel: 4
+      matrix: ${{ fromJson(needs.discover-cores.outputs.matrix) }}
 
     steps:
       - name: Checkout build scripts
@@ -193,7 +184,7 @@ jobs:
       - name: Upload core artifact
         uses: actions/upload-artifact@v4
         with:
-          name: emulatorjs-asmjs-${{ matrix.platform }}-${{ matrix.core }}
+          name: emulatorjs-asmjs-${{ matrix.core }}
           path: emulatorjs-build/asmjs-artifacts/${{ matrix.core }}
           if-no-files-found: error
           retention-days: 14
