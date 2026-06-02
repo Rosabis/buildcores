@@ -34,8 +34,9 @@ jobs:
         id: cores
         working-directory: emulatorjs-build
         run: |
-          matrix="$(jq -c '{include: [.[] | select(.options.requireThreads != true) | {core: .name}]}' cores.json)"
-          skipped="$(jq -r '[.[] | select(.options.requireThreads == true) | .name] | join(",")' cores.json)"
+          unsupported='["melonds","mupen64plus_next","yabause","pcsx_rearmed","mednafen_psx_hw","parallel_n64","same_cdi"]'
+          matrix="$(jq -c --argjson unsupported "$unsupported" '{include: [.[] | select(.options.requireThreads != true) | select((.name as $name | $unsupported | index($name)) | not) | {core: .name}]}' cores.json)"
+          skipped="$(jq -r --argjson unsupported "$unsupported" '[.[] | select(.options.requireThreads == true or (.name as $name | $unsupported | index($name))) | .name] | join(",")' cores.json)"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
           echo "Asm.js candidates:"
@@ -113,10 +114,13 @@ jobs:
           text = text.replace('            mv core-temp/threads/*.bc ./\n            emmake ./build-emulatorjs.sh --clean --threads >> "$logPath/$name-emake.log"\n            rm -f *.bc\n            if [ "$requiresWebgl2" = false ]; then\n                mv core-temp/legacyThreads/*.bc ./\n                emmake ./build-emulatorjs.sh --clean --threads --legacy >> "$logPath/$name-emake.log"\n                rm -f *.bc\n            fi', '')
           text = text.replace('$name-wasm.data', '$name-asmjs.data')
           text = text.replace('$name-legacy-wasm.data', '$name-legacy-asmjs.data')
+          text = text.replace('buildThreads() {', 'buildThreads() {\n    return 0\n}\nunused_buildThreads() {')
+          text = text.replace('buildThreadsLegacy() {', 'buildThreadsLegacy() {\n    return 0\n}\nunused_buildThreadsLegacy() {')
           text = text.replace('$name-thread-wasm.data', '$name-thread-asmjs.data')
           text = text.replace('$name-thread-legacy-wasm.data', '$name-thread-legacy-asmjs.data')
           text = text.replace('$name-thread*wasm.data', '$name-thread*asmjs.data')
           text = text.replace('$name-wasm.data $name-legacy-wasm.data', '$name-asmjs.data $name-legacy-asmjs.data')
+          text = text.replace('zip $outputPath/$name.zip $name-thread*asmjs.data\n        if [ $requireThreads = false ]; then\n            zip -u $outputPath/$name.zip  $name-asmjs.data $name-legacy-asmjs.data\n        fi', 'if [ $requireThreads = false ]; then\n            zip $outputPath/$name.zip $name-asmjs.data $name-legacy-asmjs.data\n        fi')
           path.write_text(text)
           PY
           cat > patch-asmjs.py <<'PY'
@@ -150,8 +154,8 @@ jobs:
           echo "Files in output:"
           find output -maxdepth 2 -type f -print | sort || true
           echo "Files in EmulatorJS/data/cores:"
-          find compile/RetroArch/EmulatorJS/data/cores -maxdepth 1 -type f -print | sort || true
-          core_files="$(find output compile/RetroArch/EmulatorJS/data/cores -maxdepth 2 -type f \( \
+          find compile/EmulatorJS/data/cores -maxdepth 1 -type f -print | sort || true
+          core_files="$(find output compile/EmulatorJS/data/cores -maxdepth 2 -type f \( \
             -name '${{ matrix.core }}.zip' -o \
             -name '${{ matrix.core }}-asmjs.data' -o \
             -name '${{ matrix.core }}-legacy-asmjs.data' \
