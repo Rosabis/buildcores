@@ -110,6 +110,39 @@ jobs:
           source ./.emsdk/emsdk_env.sh
           embuilder build zlib
 
+      - name: Patch EmulatorJS build scripts for asm.js
+        working-directory: emulatorjs-build
+        run: |
+          cat > patch-build.py <<'PY'
+          from pathlib import Path
+          path = Path('build.sh')
+          text = path.read_text()
+          text = text.replace('cd "$outPath"\n    rm -f *.bc', 'cd "$buildPath/RetroArch"\n    python3 ../../patch-asmjs.py\n    cd "$outPath"\n    rm -f *.bc')
+          text = text.replace('        buildThreads\n        if [ "$requiresWebgl2" = false ]; then\n            buildThreadsLegacy\n        fi', '        true')
+          text = text.replace('            mv core-temp/threads/*.bc ./\n            emmake ./build-emulatorjs.sh --clean --threads >> "$logPath/$name-emake.log"\n            rm -f *.bc\n            if [ "$requiresWebgl2" = false ]; then\n                mv core-temp/legacyThreads/*.bc ./\n                emmake ./build-emulatorjs.sh --clean --threads --legacy >> "$logPath/$name-emake.log"\n                rm -f *.bc\n            fi', '')
+          text = text.replace('$name-wasm.data', '$name-asmjs.data')
+          text = text.replace('$name-legacy-wasm.data', '$name-legacy-asmjs.data')
+          text = text.replace('$name-thread-wasm.data', '$name-thread-asmjs.data')
+          text = text.replace('$name-thread-legacy-wasm.data', '$name-thread-legacy-asmjs.data')
+          text = text.replace('$name-thread*wasm.data', '$name-thread*asmjs.data')
+          text = text.replace('$name-wasm.data $name-legacy-wasm.data', '$name-asmjs.data $name-legacy-asmjs.data')
+          path.write_text(text)
+          PY
+          cat > patch-asmjs.py <<'PY'
+          from pathlib import Path
+          makefile = Path('Makefile.emulatorjs')
+          text = makefile.read_text()
+          text = text.replace('-s ENVIRONMENT=web,worker -s WASM_BIGINT=1 \\', '-s ENVIRONMENT=web,worker -s WASM=0 \\')
+          makefile.write_text(text)
+          script = Path('emulatorjs/build-emulatorjs.sh')
+          text = script.read_text()
+          text = text.replace('  wasm=1', '  wasm=0')
+          text = text.replace('  out_name="${out_name}-wasm.data"', '  out_name="${out_name}-asmjs.data"')
+          text = text.replace('    7z a ${out_dir}/${out_name} ../${name}_libretro.js.mem ../${name}_*.js', '    7z a ${out_dir}/${out_name} ../${name}_*.js ../${name}_libretro.js.mem')
+          script.write_text(text)
+          PY
+          python3 patch-build.py
+
       - name: Build asm.js core
         working-directory: emulatorjs-build
         env:
@@ -129,10 +162,8 @@ jobs:
           find compile/RetroArch/EmulatorJS/data/cores -maxdepth 1 -type f -print | sort || true
           core_files="$(find output compile/RetroArch/EmulatorJS/data/cores -maxdepth 2 -type f \( \
             -name '${{ matrix.core }}.zip' -o \
-            -name '${{ matrix.core }}-wasm.data' -o \
-            -name '${{ matrix.core }}-legacy-wasm.data' -o \
-            -name '${{ matrix.core }}-thread-wasm.data' -o \
-            -name '${{ matrix.core }}-thread-legacy-wasm.data' \
+            -name '${{ matrix.core }}-asmjs.data' -o \
+            -name '${{ matrix.core }}-legacy-asmjs.data' \
           \) -print 2>/dev/null | sort -u)"
           if [ -z "$core_files" ]; then
             echo "No compiled core artifacts were found for ${{ matrix.core }}"
