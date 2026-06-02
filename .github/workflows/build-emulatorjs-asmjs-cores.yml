@@ -52,6 +52,16 @@ jobs:
             core: yabause
           - platform: dos
             core: dosbox_pure
+          - platform: sfc
+            core: snes9x
+          - platform: sfc
+            core: bsnes
+          - platform: fc
+            core: fceumm
+          - platform: fc
+            core: nestopia
+          - platform: n64
+            core: mupen64plus_next
 
     steps:
       - name: Checkout build scripts
