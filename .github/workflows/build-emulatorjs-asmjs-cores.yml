@@ -86,7 +86,8 @@ jobs:
             pkgconf \
             python3 \
             wget \
-            zip
+            zip \
+            zlib1g-dev
 
       - name: Cache emsdk
         uses: actions/cache@v4
@@ -103,10 +104,16 @@ jobs:
           ./.emsdk/emsdk install latest
           ./.emsdk/emsdk activate latest
 
+      - name: Prepare emscripten ports
+        working-directory: emulatorjs-build
+        run: |
+          source ./.emsdk/emsdk_env.sh
+          embuilder build zlib
+
       - name: Build asm.js core
         working-directory: emulatorjs-build
         env:
-          EMCC_FORCE_STDLIBS: libc,libc++
+          EMMAKEN_CFLAGS: -sUSE_ZLIB=1
         run: |
           source ./.emsdk/emsdk_env.sh
           bash build.sh --core=${{ matrix.core }}
@@ -115,13 +122,32 @@ jobs:
         working-directory: emulatorjs-build
         run: |
           mkdir -p asmjs-artifacts/${{ matrix.core }}
-          find output -maxdepth 1 -type f \( \
+          echo "Files in output:"
+          find output -maxdepth 2 -type f -print | sort || true
+          echo "Files in EmulatorJS/data/cores:"
+          find compile/RetroArch/EmulatorJS/data/cores -maxdepth 1 -type f -print | sort || true
+          core_files="$(find output compile/RetroArch/EmulatorJS/data/cores -maxdepth 2 -type f \( \
             -name '${{ matrix.core }}.zip' -o \
             -name '${{ matrix.core }}-wasm.data' -o \
             -name '${{ matrix.core }}-legacy-wasm.data' -o \
             -name '${{ matrix.core }}-thread-wasm.data' -o \
             -name '${{ matrix.core }}-thread-legacy-wasm.data' \
-          \) -exec cp {} asmjs-artifacts/${{ matrix.core }}/ \;
+          \) -print 2>/dev/null | sort -u)"
+          if [ -z "$core_files" ]; then
+            echo "No compiled core artifacts were found for ${{ matrix.core }}"
+            if [ -d output/logs ]; then
+              echo "Compile log tail:"
+              tail -n 120 output/logs/${{ matrix.core }}-compile.log 2>/dev/null || true
+              echo "Emake log tail:"
+              tail -n 160 output/logs/${{ matrix.core }}-emake.log 2>/dev/null || true
+            fi
+            exit 1
+          fi
+          while IFS= read -r file; do
+            cp "$file" asmjs-artifacts/${{ matrix.core }}/
+          done <<EOF
+          $core_files
+          EOF
           if [ -d output/logs ]; then
             mkdir -p asmjs-artifacts/${{ matrix.core }}/logs
             cp output/logs/${{ matrix.core }}-* asmjs-artifacts/${{ matrix.core }}/logs/ 2>/dev/null || true
@@ -130,7 +156,7 @@ jobs:
             mkdir -p asmjs-artifacts/${{ matrix.core }}/reports
             cp output/reports/${{ matrix.core }}.json asmjs-artifacts/${{ matrix.core }}/reports/ 2>/dev/null || true
           fi
-          test -n "$(find asmjs-artifacts/${{ matrix.core }} -type f | head -n 1)"
+          find asmjs-artifacts/${{ matrix.core }} -maxdepth 1 -type f \( -name '*.zip' -o -name '*.data' \) | grep -q .
 
       - name: Upload core artifact
         uses: actions/upload-artifact@v4
