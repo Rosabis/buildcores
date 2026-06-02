@@ -1,0 +1,131 @@
+name: build emulatorjs asmjs cores
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-emulatorjs-asmjs-cores.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-emulatorjs-asmjs-cores-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-core:
+    name: build ${{ matrix.platform }} (${{ matrix.core }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: psp
+            core: ppsspp
+          - platform: gba
+            core: mgba
+          - platform: nds
+            core: melonds
+          - platform: nds
+            core: desmume2015
+          - platform: nds
+            core: desmume
+          - platform: gb
+            core: gambatte
+          - platform: gbc
+            core: gambatte
+          - platform: md
+            core: genesis_plus_gx
+          - platform: md
+            core: genesis_plus_gx_wide
+          - platform: wsc
+            core: mednafen_wswan
+          - platform: ps1
+            core: pcsx_rearmed
+          - platform: ps1
+            core: mednafen_psx_hw
+          - platform: ss
+            core: yabause
+          - platform: dos
+            core: dosbox_pure
+
+    steps:
+      - name: Checkout build scripts
+        uses: actions/checkout@v4
+        with:
+          repository: EmulatorJS/build
+          ref: main
+          path: emulatorjs-build
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils-mips-linux-gnu \
+            build-essential \
+            cmake \
+            curl \
+            gpg \
+            jq \
+            libsdl2-dev \
+            p7zip-full \
+            pkgconf \
+            python3 \
+            wget \
+            zip
+
+      - name: Cache emsdk
+        uses: actions/cache@v4
+        with:
+          path: emulatorjs-build/.emsdk
+          key: emsdk-${{ runner.os }}-latest
+
+      - name: Setup emscripten
+        working-directory: emulatorjs-build
+        run: |
+          if [ ! -d .emsdk ]; then
+            git clone https://github.com/emscripten-core/emsdk.git .emsdk
+          fi
+          ./.emsdk/emsdk install latest
+          ./.emsdk/emsdk activate latest
+
+      - name: Build asm.js core
+        working-directory: emulatorjs-build
+        env:
+          EMCC_FORCE_STDLIBS: libc,libc++
+        run: |
+          source ./.emsdk/emsdk_env.sh
+          bash build.sh --core=${{ matrix.core }}
+
+      - name: Collect asm.js artifacts
+        working-directory: emulatorjs-build
+        run: |
+          mkdir -p asmjs-artifacts/${{ matrix.core }}
+          find output -maxdepth 1 -type f \( \
+            -name '${{ matrix.core }}.zip' -o \
+            -name '${{ matrix.core }}-wasm.data' -o \
+            -name '${{ matrix.core }}-legacy-wasm.data' -o \
+            -name '${{ matrix.core }}-thread-wasm.data' -o \
+            -name '${{ matrix.core }}-thread-legacy-wasm.data' \
+          \) -exec cp {} asmjs-artifacts/${{ matrix.core }}/ \;
+          if [ -d output/logs ]; then
+            mkdir -p asmjs-artifacts/${{ matrix.core }}/logs
+            cp output/logs/${{ matrix.core }}-* asmjs-artifacts/${{ matrix.core }}/logs/ 2>/dev/null || true
+          fi
+          if [ -d output/reports ]; then
+            mkdir -p asmjs-artifacts/${{ matrix.core }}/reports
+            cp output/reports/${{ matrix.core }}.json asmjs-artifacts/${{ matrix.core }}/reports/ 2>/dev/null || true
+          fi
+          test -n "$(find asmjs-artifacts/${{ matrix.core }} -type f | head -n 1)"
+
+      - name: Upload core artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulatorjs-asmjs-${{ matrix.platform }}-${{ matrix.core }}
+          path: emulatorjs-build/asmjs-artifacts/${{ matrix.core }}
+          if-no-files-found: error
+          retention-days: 14
