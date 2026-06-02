@@ -113,7 +113,8 @@ jobs:
       - name: Build asm.js core
         working-directory: emulatorjs-build
         env:
-          EMMAKEN_CFLAGS: -sUSE_ZLIB=1
+          EMCC_CFLAGS: -sUSE_ZLIB=1
+          EMCC_CXXFLAGS: -sUSE_ZLIB=1
         run: |
           source ./.emsdk/emsdk_env.sh
           bash build.sh --core=${{ matrix.core }}
